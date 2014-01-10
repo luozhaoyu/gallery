@@ -77,7 +77,7 @@ def compile():
     TODO
     """
     print "sudo apt-get install libncurses5 libncurses-dev"
-    print "cmake -DCMAKE_INSTALL_PREFIX=~/mysql/mysql"
+    print "cmake -DCMAKE_INSTALL_PREFIX=~/services/mysql"
 
 
 def install_new_db(datadir, basedir):
@@ -96,7 +96,7 @@ def create_mysql_configuration(cnf_file_name, basedir):
 
 def create_master_master_replication(m1datadir, m2datadir, basedir,
         m1name='m1', m2name='m2', sync_db='sync_db', m1defaults_file=None,
-        m2defaults_file=None):
+        m2defaults_file=None, m1port=3391, m2port=3392):
 
     def parse_file_position(status):
         try:
@@ -140,8 +140,6 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
 
     m1defaults_file = os.path.join(basedir, "%s.cnf" % m1name) if not m1defaults_file else m1defaults_file
     m2defaults_file = os.path.join(basedir, "%s.cnf" % m2name) if not m2defaults_file else m2defaults_file
-    m1port = 3391
-    m2port = 3392
     m1_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m1port)
     m2_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m2port)
     def setup():
@@ -174,26 +172,35 @@ def remove_files_recursively(path):
 
 def _main(argv):
     parser = argparse.ArgumentParser(description='mysql replicate tool: this tool'
-           'assumes you would like to put mysql things in the current user home')
-    parser.add_argument('-b', '--basedir', help='basedir', default=os.path.expanduser('~/mysql/mysql'))
-    parser.add_argument('-d', '--datadir', help='datadir', default=os.path.expanduser('~/mysql/data'))
+           'assumes you would like to put mysql things in ~/services/mysql'
+           'PLEASE CHECK THE DEFAULT SETTING CAREFULLY')
+    parser.add_argument('-b', '--basedir', help='default basedir: ~/services/mysql', default=os.path.expanduser('~/services/mysql'))
+    parser.add_argument('-d', '--datadir', help='default datadir: ~/mysqldata', default=os.path.expanduser('~/mysqldata'))
+    parser.add_argument('-db', '--dbname', help='default db name: sync_db', default='sync_db')
+    parser.add_argument('-n', '--name', help='db name: db1', default='db1')
+    parser.add_argument('-n2', '--name2', help='db name: db1', default='db2')
+    parser.add_argument('-p', '--port', help='db port: 3391', type=int, default=3391)
+    parser.add_argument('-p2', '--port2', help='db port: 3392', type=int, default=3392)
     different_actions = parser.add_mutually_exclusive_group()
     different_actions.add_argument('-c', '--create-single-db', help='', action="store_true")
     different_actions.add_argument('-t', '--test', help='', action="store_true")
-    different_actions.add_argument('-cm', '--create-mm', help='', action="store_true")
+    different_actions.add_argument('-cmm', '--create-master-master', help='', action="store_true")
     args = parser.parse_args()
     print args
     if args.create_single_db:
         install_new_db(datadir=args.datadir, basedir=args.basedir)
-    elif args.test:
-        m1datadir = os.path.join(args.datadir, 'mmtest1')
-        m2datadir = os.path.join(args.datadir, 'mmtest2')
+    elif args.create_master_master:
+        m1datadir = os.path.join(args.datadir, args.name)
+        m2datadir = os.path.join(args.datadir, args.name2)
         remove_files_recursively(m1datadir)
         remove_files_recursively(m2datadir)
-        create_master_master_replication(m1datadir, m2datadir, basedir=args.basedir, m1name='mmtest1', m2name='mmtest2')
-        print "SEE SEE: %s -u root -P 3391 -h 127.0.0.1" % (os.path.join(args.basedir, 'bin', 'mysql'))
+        create_master_master_replication(m1datadir, m2datadir,
+            basedir=args.basedir, m1name=args.name, m2name=args.name2,
+            sync_db=args.dbname, m1port=args.port, m2port=args.port2)
+        print "SEE SEE: %s -u root -P %s -h 127.0.0.1" % (os.path.join(args.basedir, 'bin', 'mysql'), args.port)
+        print "SEE SEE: %s -u root -P %s -h 127.0.0.1" % (os.path.join(args.basedir, 'bin', 'mysql'), args.port2)
     else:
-        parse_file_position("")
+        compile()
 
 
 if __name__ == '__main__':
