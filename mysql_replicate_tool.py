@@ -55,6 +55,8 @@ class MysqlConfig(object):
         self.mysql = {
                     'port': port,
                     'socket': socket,
+                    'character-set-client': 'utf8',
+                    'datadir': datadir,
                 }
         self.mysqld = kwargs
         self.mysqld.update({
@@ -65,9 +67,18 @@ class MysqlConfig(object):
                     'datadir': datadir,
                     'log-slave-updates': None,
                     'sync_binlog': 1,
-                    'binlog-ignore-db': 'mysql',
-                    'replicate-ignore-db': 'mysql,information_schema',
+                    'binlog-ignore-db': 'performance_schema',
                     'socket': socket,
+                    'character-set-server': 'utf8',
+                    'default-storage-engine': 'InnoDB',
+                    'innodb_file_per_table': None,
+                    'collation_server': 'utf8_general_ci',
+                    'max_connections': 2000,
+                    'max_user_connections': 1980,
+                    'slow-query-log': None,
+                    'long_query_time': 3,
+                    'relay-log': "%s-relay-bin" % name,
+                    'relay-log-index': "%s-relay-bin.index" % name,
                 })
 
     def __str__(self):
@@ -113,19 +124,6 @@ class MysqlConfig(object):
         return res
 
 
-def start_mysql_instance(basedir, config, defaults_file):
-    """DEPRECATED"""
-    with open(defaults_file, 'w') as f:
-        f.write(str(config))
-
-    # start mysql
-    start_mysql = "%s --defaults-file=%s &" % (os.path.join(basedir, 'bin', 'mysqld_safe'), defaults_file)
-    execute_in_background(start_mysql)
-    print "STARTING: %s" % start_mysql
-    # in case the mysql does not start in time
-    time.sleep(3)
-
-
 def compile():
     """Compile mysql source
     TODO
@@ -135,16 +133,8 @@ def compile():
     print "cmake -DCMAKE_INSTALL_PREFIX=~/services/mysql -DDEFAULT_CHARSET=utf8 -DDEFAULT_COLLATION=utf8_general_ci -DENABLED_LOCAL_INFILE=1 -DWITH_INNOBASE_STORAGE_ENGINE=1"
 
 
-
-
 def create_mysql_configuration(cnf_file_name, basedir):
     pass
-
-
-def setup_new_mysql(datadir, basedir, config, defaults_file):
-    """DEPRECATED"""
-    install_new_db(datadir, basedir)
-    start_mysql_instance(basedir, config, defaults_file)
 
 
 def create_master_slave_replication(mdatadir, sdatadir, basedir,
@@ -184,6 +174,7 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
         m1log_file, m1log_pos = parse_file_position(result)
         result = execute("%s \"%s\"" % (m2_connect, show_master_status))
         m2log_file, m2log_pos = parse_file_position(result)
+        # TODO: plain text is insecure.
         change_master_to_m1 = "change master to master_host='127.0.0.1',\
             master_port=%s, master_user='repl', master_password='replpass',\
             master_log_file='%s', master_log_pos=%s;" % (m1port, m1log_file, m1log_pos)
@@ -204,11 +195,11 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
         m1config = MysqlConfig(name=m1name, port=m1port, server_id=91, basedir=basedir,
                 datadir=m1datadir, defaults_file=m1defaults_file,
                 auto_increment_offset=1, auto_increment_increment=2,
-                binlog_do_db=sync_db, replicate_do_db=sync_db)
+                replicate_do_db=sync_db)
         m2config = MysqlConfig(name=m2name, port=m2port, server_id=92, basedir=basedir,
                 datadir=m2datadir, defaults_file=m2defaults_file,
                 auto_increment_offset=2, auto_increment_increment=2,
-                binlog_do_db=sync_db, replicate_do_db=sync_db)
+                replicate_do_db=sync_db)
         visit_m1 = m1config.setup_new_mysql()
         visit_m2 = m2config.setup_new_mysql()
         return visit_m1, visit_m2
@@ -223,9 +214,9 @@ def remove_files_recursively(path):
 
 
 def _main(argv):
-    parser = argparse.ArgumentParser(description='mysql replicate tool: this tool'
-           'assumes you would like to put mysql things in ~/services/mysql'
-           'PLEASE CHECK THE DEFAULT SETTING CAREFULLY')
+    parser = argparse.ArgumentParser(description="""
+        mysql replicate tool: this tool assumes you would like to put mysql things in ~/services/mysql
+        PLEASE CHECK THE DEFAULT SETTING CAREFULLY""")
     parser.add_argument('-b', '--basedir', help='default basedir: ~/services/mysql', default=os.path.expanduser('~/services/mysql'))
     parser.add_argument('-d', '--datadir', help='default datadir: ~/mysqldata', default=os.path.expanduser('~/mysqldata'))
     parser.add_argument('-db', '--dbname', help='default db name: sync_db', default='sync_db')
@@ -242,10 +233,10 @@ def _main(argv):
     print args
     if args.setup_new_mysql:
         config = MysqlConfig(name=args.name, port=args.port, server_id=91, basedir=args.basedir,
-                datadir=args.datadir,
-                binlog_do_db=args.dbname, replicate_do_db=args.dbname)
-        defaults_file = os.path.join(args.basedir, "%s.cnf" % args.name)
-        setup_new_mysql(args.datadir, args.basedir, config, defaults_file)
+                datadir=os.path.join(args.datadir, args.name),
+                replicate_do_db=args.dbname)
+        res = config.setup_new_mysql()
+        print res
     elif args.create_master_master:
         m1datadir = os.path.join(args.datadir, args.name)
         m2datadir = os.path.join(args.datadir, args.name2)
