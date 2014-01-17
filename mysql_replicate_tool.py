@@ -14,9 +14,44 @@ import time
 stdout_file = open('stdout.txt', 'a')
 stderr_file = open('stderr.txt', 'a')
 
+
+def execute(cmd):
+    result = None
+    try:
+        result = subprocess.check_output(
+                cmd,
+                stderr=subprocess.STDOUT,
+                shell=True)
+    except subprocess.CalledProcessError as e:
+        print e
+        print e.cmd, e.output
+        print cmd
+        raise
+    return result
+
+
+def execute_in_background(cmd):
+    subprocess.Popen(cmd, shell=True, stdout=stdout_file, stderr=stderr_file)
+
+
+def install_new_db(datadir, basedir):
+    if not os.path.exists(datadir):
+        os.makedirs(datadir)
+    mysql_install_db = os.path.join(basedir, 'scripts', 'mysql_install_db')
+    cmd = "%s --basedir=%s --datadir=%s --no-defaults" % (mysql_install_db, basedir, datadir)
+    print "INSTALL NEW DB at %s" % datadir
+    result = execute(cmd)
+    return result
+
+
 class MysqlConfig(object):
-    def __init__(self, name, port, server_id, basedir, datadir, socket=None, **kwargs):
+    def __init__(self, name, port, server_id, basedir, datadir, socket=None, defaults_file=None, **kwargs):
+        self.name = name
+        self.port = port
+        self.basedir = basedir
+        self.datadir = datadir
         socket = os.path.join(datadir, "%s.sock" % name) if not socket else socket
+        self.defaults_file = os.path.join(basedir, "%s.cnf" % name) if not defaults_file else defaults_file
         self.mysql = {
                     'port': port,
                     'socket': socket,
@@ -52,45 +87,69 @@ class MysqlConfig(object):
 
         return "%s\n\n%s" % ('\n'.join(mysql_configs), '\n'.join(mysqld_configs))
 
+    def get_defaults_filepath(self):
+        return self.defaults_file
 
-def execute(cmd):
-    result = None
-    try:
-        result = subprocess.check_output(
-                cmd,
-                stderr=subprocess.STDOUT,
-                shell=True)
-    except subprocess.CalledProcessError as e:
-        print e
-        print e.cmd, e.output
-        print cmd
-        raise
-    return result
+    def install_new_db(self):
+        return install_new_db(self.datadir, self.basedir)
+
+    def start_mysql_instance(self, wait_mysqld_start=3):
+        with open(self.defaults_file, 'w') as f:
+            f.write(str(self))
+
+        # start mysql
+        start_mysql = "%s --defaults-file=%s &" % (os.path.join(self.basedir, 'bin', 'mysqld_safe'), self.defaults_file)
+        execute_in_background(start_mysql)
+        res = "STARTING: %s" % start_mysql
+        print res
+        # in case the mysql does not start in time
+        time.sleep(wait_mysqld_start)
+        return res
+
+    def setup_new_mysql(self):
+        self.install_new_db()
+        self.start_mysql_instance()
+        res = "SEE SEE: %s -u root -P %s -h 127.0.0.1" % (os.path.join(self.basedir, 'bin', 'mysql'), self.port)
+        return res
 
 
-def execute_in_background(cmd):
-    subprocess.Popen(cmd, shell=True, stdout=stdout_file, stderr=stderr_file)
+def start_mysql_instance(basedir, config, defaults_file):
+    """DEPRECATED"""
+    with open(defaults_file, 'w') as f:
+        f.write(str(config))
+
+    # start mysql
+    start_mysql = "%s --defaults-file=%s &" % (os.path.join(basedir, 'bin', 'mysqld_safe'), defaults_file)
+    execute_in_background(start_mysql)
+    print "STARTING: %s" % start_mysql
+    # in case the mysql does not start in time
+    time.sleep(3)
 
 
 def compile():
     """Compile mysql source
     TODO
     """
+    print "http://dev.mysql.com/doc/refman/5.6/en/source-configuration-options.html"
     print "sudo apt-get install libncurses5 libncurses-dev"
-    print "cmake -DCMAKE_INSTALL_PREFIX=~/services/mysql"
+    print "cmake -DCMAKE_INSTALL_PREFIX=~/services/mysql -DDEFAULT_CHARSET=utf8 -DDEFAULT_COLLATION=utf8_general_ci -DENABLED_LOCAL_INFILE=1 -DWITH_INNOBASE_STORAGE_ENGINE=1"
 
 
-def install_new_db(datadir, basedir):
-    if not os.path.exists(datadir):
-        os.makedirs(datadir)
-    mysql_install_db = os.path.join(basedir, 'scripts', 'mysql_install_db')
-    cmd = "%s --basedir=%s --datadir=%s --no-defaults" % (mysql_install_db, basedir, datadir)
-    print "INSTALL NEW DB at %s" % datadir
-    result = execute(cmd)
-    return result
 
 
 def create_mysql_configuration(cnf_file_name, basedir):
+    pass
+
+
+def setup_new_mysql(datadir, basedir, config, defaults_file):
+    """DEPRECATED"""
+    install_new_db(datadir, basedir)
+    start_mysql_instance(basedir, config, defaults_file)
+
+
+def create_master_slave_replication(mdatadir, sdatadir, basedir,
+        mname='master1', sname='slave1', sync_db='sync_db', mdefaults_file=None,
+        sdefaults_file=None, mport=3391, sport=3392):
     pass
 
 
@@ -109,7 +168,10 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
         log_position = columns[1].strip()
         return log_file, log_position
 
-    def configure():
+    def configure(basedir):
+        m1_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m1port)
+        m2_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m2port)
+
         grant_repl = "grant replication slave on *.* to \'repl\'@127.0.0.1 identified by \'replpass\'; flush privileges"
         flush_table = "flush tables with read lock"
         show_master_status = "show master status"
@@ -138,32 +200,22 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
         execute("%s \"%s\"" % (m1_connect, start_slave))
         execute("%s \"%s\"" % (m2_connect, start_slave))
 
-    m1defaults_file = os.path.join(basedir, "%s.cnf" % m1name) if not m1defaults_file else m1defaults_file
-    m2defaults_file = os.path.join(basedir, "%s.cnf" % m2name) if not m2defaults_file else m2defaults_file
-    m1_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m1port)
-    m2_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m2port)
-    def setup():
-        install_new_db(m1datadir, basedir)
-        install_new_db(m2datadir, basedir)
+    def setup(m1defaults_file, m2defaults_file):
         m1config = MysqlConfig(name=m1name, port=m1port, server_id=91, basedir=basedir,
-                datadir=m1datadir, auto_increment_offset=1, auto_increment_increment=2,
+                datadir=m1datadir, defaults_file=m1defaults_file,
+                auto_increment_offset=1, auto_increment_increment=2,
                 binlog_do_db=sync_db, replicate_do_db=sync_db)
         m2config = MysqlConfig(name=m2name, port=m2port, server_id=92, basedir=basedir,
-                datadir=m2datadir, auto_increment_offset=2, auto_increment_increment=2,
+                datadir=m2datadir, defaults_file=m2defaults_file,
+                auto_increment_offset=2, auto_increment_increment=2,
                 binlog_do_db=sync_db, replicate_do_db=sync_db)
-        with open(m1defaults_file, 'w') as f:
-            f.write(str(m1config))
-        with open(m2defaults_file, 'w') as f:
-            f.write(str(m2config))
+        visit_m1 = m1config.setup_new_mysql()
+        visit_m2 = m2config.setup_new_mysql()
+        return visit_m1, visit_m2
 
-        # start mysql
-        start_mysql = "%s --defaults-file=%%s &" % (os.path.join(basedir, 'bin', 'mysqld_safe'))
-        execute_in_background(start_mysql % m1defaults_file)
-        execute_in_background(start_mysql % m2defaults_file)
-        # in case the mysql does not start in time
-        time.sleep(3)
-    setup()
-    configure()
+    visit_m1, visit_m2 = setup(m1defaults_file, m2defaults_file)
+    configure(basedir)
+    return '\n'.join([visit_m1, visit_m2])
 
 
 def remove_files_recursively(path):
@@ -182,23 +234,29 @@ def _main(argv):
     parser.add_argument('-p', '--port', help='db port: 3391', type=int, default=3391)
     parser.add_argument('-p2', '--port2', help='db port: 3392', type=int, default=3392)
     different_actions = parser.add_mutually_exclusive_group()
-    different_actions.add_argument('-c', '--create-single-db', help='', action="store_true")
+    different_actions.add_argument('-s', '--setup-new-mysql', help='setup a new mysql instance', action="store_true")
     different_actions.add_argument('-t', '--test', help='', action="store_true")
-    different_actions.add_argument('-cmm', '--create-master-master', help='', action="store_true")
+    different_actions.add_argument('-cmm', '--create-master-master', help='create a master master replication', action="store_true")
+    different_actions.add_argument('-cms', '--create-master-slave', help='create a master slave replication', action="store_true")
     args = parser.parse_args()
     print args
-    if args.create_single_db:
-        install_new_db(datadir=args.datadir, basedir=args.basedir)
+    if args.setup_new_mysql:
+        config = MysqlConfig(name=args.name, port=args.port, server_id=91, basedir=args.basedir,
+                datadir=args.datadir,
+                binlog_do_db=args.dbname, replicate_do_db=args.dbname)
+        defaults_file = os.path.join(args.basedir, "%s.cnf" % args.name)
+        setup_new_mysql(args.datadir, args.basedir, config, defaults_file)
     elif args.create_master_master:
         m1datadir = os.path.join(args.datadir, args.name)
         m2datadir = os.path.join(args.datadir, args.name2)
         remove_files_recursively(m1datadir)
         remove_files_recursively(m2datadir)
-        create_master_master_replication(m1datadir, m2datadir,
+        res = create_master_master_replication(m1datadir, m2datadir,
             basedir=args.basedir, m1name=args.name, m2name=args.name2,
             sync_db=args.dbname, m1port=args.port, m2port=args.port2)
-        print "SEE SEE: %s -u root -P %s -h 127.0.0.1" % (os.path.join(args.basedir, 'bin', 'mysql'), args.port)
-        print "SEE SEE: %s -u root -P %s -h 127.0.0.1" % (os.path.join(args.basedir, 'bin', 'mysql'), args.port2)
+        print res
+    elif args.create_master_slave:
+        print "TODO: still in progress"
     else:
         compile()
 
