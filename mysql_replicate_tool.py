@@ -9,6 +9,7 @@ import os
 import subprocess
 import argparse
 import time
+import socket
 
 
 stdout_file = open('stdout.txt', 'a')
@@ -45,21 +46,22 @@ def install_new_db(datadir, basedir):
 
 
 class MysqlConfig(object):
-    def __init__(self, name, port, server_id, basedir, datadir, socket=None, defaults_file=None, **kwargs):
+    def __init__(self, name, port, basedir, datadir, server_id=None, socket_file=None, defaults_file=None, **kwargs):
+        server_id = "127001%i" % port if not server_id else server_id
         self.name = name
         self.port = port
         self.basedir = basedir
         self.datadir = datadir
-        socket = os.path.join(datadir, "%s.sock" % name) if not socket else socket
+        socket_file = os.path.join(datadir, "%s.sock" % name) if not socket_file else socket_file
         self.defaults_file = os.path.join(basedir, "%s.cnf" % name) if not defaults_file else defaults_file
-        self.mysql = {
+        self.client = {
+                    'host': '127.0.0.1',
                     'port': port,
-                    'socket': socket,
-                    'character-set-client': 'utf8',
-                    'datadir': datadir,
+                    'socket': socket_file,
                 }
         self.mysqld = kwargs
         self.mysqld.update({
+                    'bind-address': '0.0.0.0',
                     'port': port,
                     'log_bin': "%s-bin" % name,
                     'server_id': server_id,
@@ -68,8 +70,9 @@ class MysqlConfig(object):
                     'log-slave-updates': None,
                     'sync_binlog': 1,
                     'binlog-ignore-db': 'performance_schema',
-                    'socket': socket,
+                    'socket': socket_file,
                     'character-set-server': 'utf8',
+                    'character-set-client': 'utf8',
                     'default-storage-engine': 'InnoDB',
                     'innodb_file_per_table': None,
                     'collation_server': 'utf8_general_ci',
@@ -79,12 +82,15 @@ class MysqlConfig(object):
                     'long_query_time': 3,
                     'relay-log': "%s-relay-bin" % name,
                     'relay-log-index': "%s-relay-bin.index" % name,
+                    # TODO: the better report-host is host_name + db_name
+                    'report-host': "%s-%s" % (socket.gethostname(), name),
+                    'expire_logs_days': 28,
                 })
 
     def __str__(self):
-        mysql_configs = ['[mysql]']
+        mysql_configs = ['[client]']
         mysqld_configs = ['[mysqld]']
-        for k, v in sorted(self.mysql.items()):
+        for k, v in sorted(self.client.items()):
             if v:
                 mysql_configs.append("%s = %s" % (k, v))
             else:
@@ -192,11 +198,11 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
         execute("%s \"%s\"" % (m2_connect, start_slave))
 
     def setup(m1defaults_file, m2defaults_file):
-        m1config = MysqlConfig(name=m1name, port=m1port, server_id=91, basedir=basedir,
+        m1config = MysqlConfig(name=m1name, port=m1port, basedir=basedir,
                 datadir=m1datadir, defaults_file=m1defaults_file,
                 auto_increment_offset=1, auto_increment_increment=2,
                 replicate_do_db=sync_db)
-        m2config = MysqlConfig(name=m2name, port=m2port, server_id=92, basedir=basedir,
+        m2config = MysqlConfig(name=m2name, port=m2port, basedir=basedir,
                 datadir=m2datadir, defaults_file=m2defaults_file,
                 auto_increment_offset=2, auto_increment_increment=2,
                 replicate_do_db=sync_db)
@@ -232,7 +238,7 @@ def _main(argv):
     args = parser.parse_args()
     print args
     if args.setup_new_mysql:
-        config = MysqlConfig(name=args.name, port=args.port, server_id=91, basedir=args.basedir,
+        config = MysqlConfig(name=args.name, port=args.port, basedir=args.basedir,
                 datadir=os.path.join(args.datadir, args.name),
                 replicate_do_db=args.dbname)
         res = config.setup_new_mysql()
