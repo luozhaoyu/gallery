@@ -82,9 +82,9 @@ class MysqlConfig(object):
                     'long_query_time': 3,
                     'relay-log': "%s-relay-bin" % name,
                     'relay-log-index': "%s-relay-bin.index" % name,
-                    # TODO: the better report-host is host_name + db_name
                     'report-host': "%s-%s" % (socket.gethostname(), name),
                     'expire_logs_days': 28,
+                    'skip-name-resolve': None,
                 })
 
     def __str__(self):
