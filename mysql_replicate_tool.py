@@ -67,8 +67,11 @@ class MysqlConfig(object):
                     'server_id': server_id,
                     'basedir': basedir,
                     'datadir': datadir,
+                    #: you could also OFF it. You have to enable it when using master-master-slave.
+                    #: And, if your master corrupt and slaves do not catch up with master, you should only raise the slave enable the log-slave-updates
                     'log-slave-updates': None,
-                    'sync_binlog': 1,
+                    'sync-binlog': '0',
+                    'binlog-format': 'STATEMENT',
                     'binlog-ignore-db': 'performance_schema',
                     'socket': socket_file,
                     'character-set-server': 'utf8',
