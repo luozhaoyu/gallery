@@ -20,13 +20,58 @@ MYSQL_MASTER_PARAMS = {
 }
 
 
+def dict_to_where(d):
+    """convert dict to mysql clause where"""
+    args = d.values()
+    where = "WHERE %s" % ' and '.join(['`%s`=%%s' % i for i in d.keys()])
+    return where, args
+
+
+def dict_to_values(array_or_dict):
+    """convert dict to mysql clause values
+    Args:
+        array_or_dict
+
+    Raise:
+        AssertionError: input items' keys must be identical, no more, no less
+    """
+    if isinstance(array_or_dict, dict):
+        array_or_dict = [array_or_dict]
+    args = []
+    assumed_keys = set()
+    for d in array_or_dict:
+        if assumed_keys:
+            try:
+                assert assumed_keys == set(d.keys())
+            except AssertionError as e:
+                raise e("insert items' keys are not identical")
+        else:
+            assumed_keys = set(d.keys())
+        args.extend([d[i] for i in assumed_keys])
+
+    fields = ', '.join(["`%s`" % i for i in assumed_keys])
+    placeholder = "(%s)" % ', '.join(['%s'] * len(d))
+    placeholders = ', '.join([placeholder] * len(array_or_dict))
+    values = "(%s) VALUES %s" % (fields, placeholders)
+    return values, args
+
+
+def dict_to_set(d):
+    """convert dict to mysql clause set"""
+    args = d.values()
+    set_ = "SET %s" % ", ".join(['`%s`=%%s' % i for i in d.keys()])
+    return set_, args
+
+
 def create_pool(creator=MySQLdb, configs=MYSQL_MASTER_PARAMS):
     dbpool = PooledDB(creator=creator, **configs)
     return dbpool
 
 
 class MysqldbWrapper(object):
-    def __init__(self, pool):
+    def __init__(self, pool=None, **kwargs):
+        if not pool:
+            pool = create_pool(configs=kwargs)
         self._pool = pool
 
     def get_new_connection(self):
@@ -77,36 +122,36 @@ class MysqldbWrapper(object):
         else:
             return False
 
-    def select(self, select, args=None):
+    def fetch(self, select, args=None):
         result = []
         try:
             cursor = self.create_cursor()
-            #cursor.execute('set names utf8')
             cursor.execute(select, args=args)
             columns = [i[0] for i in cursor.description]
             for i in cursor.fetchall():
-                item = {}
-                for j in range(0, len(i)):
-                    item[columns[j]] = i[j]
+                item = dict(zip(columns, i))
                 result.append(item)
-        except MySQLdb.ProgrammingError:
-            info = '%s\t%s' % (select, args)
-            if hasattr(self, 'logger'):
-                self.logger.error(info)
-            else:
-                print "ERROR\t", info
+        except MySQLdb.ProgrammingError as e:
+            print e
         finally:
             cursor.close()
         return result
 
-    def execute(self, query, args=None):
+    def execute(self, query, args=None, commit=True, select_identity=False):
         """
         Returns:
-            int, affected row numbers
+            int, affected row numbers or generated id for new item
         """
+        conn = self.get_usable_connection()
+        result = None
         try:
-            cursor = self.create_cursor()
+            cursor = conn.cursor()
             result = cursor.execute(query, args=args)
+            if commit:
+                conn.commit()
+            if select_identity:
+                cursor.execute('select @@identity')
+                result = cursor.fetchone()[0]
         except Exception as e:
             raise e
         finally:
@@ -117,14 +162,51 @@ class MysqldbWrapper(object):
         pass
 
 
+class MysqldbDao(MysqldbWrapper):
+    def select(self, select, args=None):
+        return self.fetch(select=select, args=args)
+
+    def insert(self, table, value_dict, replace=False):
+        """
+        Args:
+            table: table name
+            value_dict: {} or [{}], the item(s) to be inserted in dict form
+        """
+        values_clause, args = dict_to_values(value_dict)
+        action = 'REPLACE' if replace else 'INSERT'
+        insert = "%s INTO `%s` %s" % (action, table, values_clause)
+        return self.execute(query=insert, args=args, select_identity=True)
+
+    def update(self, table, update_dict, where_dict=None):
+        set_clause, args = dict_to_set(update_dict)
+        if where_dict:
+            where_clause, where_args = dict_to_where(where_dict)
+            update = "UPDATE `%s` %s %s" % (table, set_clause, where_clause)
+            args.extend(where_args)
+        else:
+            update = "UPDATE `%s` %s" % (table, where_clause)
+        return self.execute(query=update, args=args)
+
+    def replace(self, table, value_dict):
+        return self.insert(table=table, value_dict=value_dict, replace=True)
+
+
 test_pool = create_pool()
-test = MysqldbWrapper(test_pool)
+test = MysqldbDao(**MYSQL_MASTER_PARAMS)
 
 def _main(argv):
-    import time
-    while True:
-        print test.create_cursor(), "sleeping 1s...", int(time.time())
-        time.sleep(1)
+    def retry_test():
+        import time
+        while True:
+            print test.create_cursor(), "sleeping 1s...", int(time.time())
+            time.sleep(1)
+
+    print test.select('select * from a')
+    d = {'id': 4}
+    print test.insert('a', [d, {'id': 1}])
+    print test.select('select * from a')
+    print test.update('a', {'id': 2}, {'id': 4})
+    print test.select('select * from a')
 
 
 if __name__ == '__main__':
