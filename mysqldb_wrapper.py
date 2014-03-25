@@ -122,17 +122,17 @@ class MysqldbWrapper(object):
         else:
             return False
 
-    def fetch(self, select, args=None):
+    def fetch(self, query, args=None):
         result = []
         try:
             cursor = self.create_cursor()
-            cursor.execute(select, args=args)
+            cursor.execute(query=query, args=args)
             columns = [i[0] for i in cursor.description]
             for i in cursor.fetchall():
                 item = dict(zip(columns, i))
                 result.append(item)
         except MySQLdb.ProgrammingError as e:
-            print e
+            raise e
         finally:
             cursor.close()
         return result
@@ -164,7 +164,7 @@ class MysqldbWrapper(object):
 
 class MysqldbDao(MysqldbWrapper):
     def select(self, select, args=None):
-        return self.fetch(select=select, args=args)
+        return self.fetch(query=select, args=args)
 
     def insert(self, table, value_dict, replace=False):
         """
