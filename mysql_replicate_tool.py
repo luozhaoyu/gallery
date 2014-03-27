@@ -107,6 +107,12 @@ class MysqlConfig(object):
 
         return "%s\n\n%s" % ('\n'.join(mysql_configs), '\n'.join(mysqld_configs))
 
+    def execute(self, operation):
+        """execute console operation like: mysql ... -e 'operation'"""
+        op = "%s --defaults-file=%s -u root -e \"%s\"" %\
+            (os.path.join(self.basedir, 'bin', 'mysql'), self.defaults_file, operation)
+        return execute(op)
+
     def get_defaults_filepath(self):
         return self.defaults_file
 
@@ -129,7 +135,12 @@ class MysqlConfig(object):
     def setup_new_mysql(self):
         self.install_new_db()
         self.start_mysql_instance()
-        res = "SEE SEE: %s -u root -P %s -h 127.0.0.1" % (os.path.join(self.basedir, 'bin', 'mysql'), self.port)
+        if self.mysqld.get('replicate_do_db'):
+            self.execute('create database %s' % self.mysqld.get('replicate_do_db'))
+            print "Database: %s created" % self.mysqld.get('replicate_do_db')
+        res = "SEE SEE:\n%s -u root -P %s -h 127.0.0.1\n%s -u root -P %s -h 127.0.0.1 shutdown"\
+            % (os.path.join(self.basedir, 'bin', 'mysql'), self.port,
+            os.path.join(self.basedir, 'bin', 'mysqladmin'), self.port)
         return res
 
 
@@ -146,26 +157,53 @@ def create_mysql_configuration(cnf_file_name, basedir):
     pass
 
 
+def parse_file_position(status):
+    try:
+        status_line = status.split('\n')[1]
+        columns = status_line.split('\t')
+    except IndexError as e:
+        print status
+        raise e
+    log_file = columns[0].strip()
+    log_position = columns[1].strip()
+    return log_file, log_position
+
+
 def create_master_slave_replication(mdatadir, sdatadir, basedir,
-        mname='master1', sname='slave1', sync_db='sync_db', mdefaults_file=None,
+        mname='master1', sname='slave1', replicate_do_db='sync_db', mdefaults_file=None,
         sdefaults_file=None, mport=3391, sport=3392):
-    pass
+    """
+    Password is hardcoded: replpass
+    """
+    master = MysqlConfig(name=mname, port=mport, basedir=basedir,
+            datadir=mdatadir, defaults_file=mdefaults_file,
+            replicate_do_db=replicate_do_db)
+    slave = MysqlConfig(name=sname, port=sport, basedir=basedir,
+            datadir=sdatadir, defaults_file=sdefaults_file,
+            replicate_do_db=replicate_do_db)
+    print master.setup_new_mysql()
+    print slave.setup_new_mysql()
+
+    grant_repl = "grant replication slave on *.* to \'repl\'@127.0.0.1 identified by \'replpass\'; flush privileges"
+    #: (TODO) this kind of read lock is vainless
+    flush_table = "flush tables with read lock"
+    master.execute(grant_repl)
+    master.execute(flush_table)
+    master_status = master.execute("show master status")
+    log_file, log_position = parse_file_position(master_status)
+
+    change_master = "change master to master_host='127.0.0.1',\
+        master_port=%s, master_user='repl', master_password='replpass',\
+        master_log_file='%s', master_log_pos=%s;" % (mport, log_file, log_position)
+    slave.execute(change_master)
+    master.execute("unlock tables")
+    slave.execute("start slave")
 
 
 def create_master_master_replication(m1datadir, m2datadir, basedir,
-        m1name='m1', m2name='m2', sync_db='sync_db', m1defaults_file=None,
+        m1name='m1', m2name='m2', replicate_do_db='sync_db', m1defaults_file=None,
         m2defaults_file=None, m1port=3391, m2port=3392):
 
-    def parse_file_position(status):
-        try:
-            status_line = status.split('\n')[1]
-            columns = status_line.split('\t')
-        except IndexError as e:
-            print status
-            raise e
-        log_file = columns[0].strip()
-        log_position = columns[1].strip()
-        return log_file, log_position
 
     def configure(basedir):
         m1_connect = "%s -u root -h 127.0.0.1 -P %s -e" % (os.path.join(basedir, 'bin', 'mysql'), m1port)
@@ -195,25 +233,24 @@ def create_master_master_replication(m1datadir, m2datadir, basedir,
 
         unlock = "unlock tables"
         start_slave = 'start slave'
-        execute("%s \"%s\"" % (m1_connect, unlock))
-        execute("%s \"%s\"" % (m2_connect, unlock))
-        execute("%s \"%s\"" % (m1_connect, start_slave))
-        execute("%s \"%s\"" % (m2_connect, start_slave))
+        # lock should be released once it has determined the initial status of the other server
+        # it would be fine even the server has not started slave
+        m1config.execute(unlock)
+        m2config.execute(unlock)
+        m1config.execute(start_slave)
+        m2config.execute(start_slave)
 
-    def setup(m1defaults_file, m2defaults_file):
-        m1config = MysqlConfig(name=m1name, port=m1port, basedir=basedir,
-                datadir=m1datadir, defaults_file=m1defaults_file,
-                auto_increment_offset=1, auto_increment_increment=2,
-                replicate_do_db=sync_db)
-        m2config = MysqlConfig(name=m2name, port=m2port, basedir=basedir,
-                datadir=m2datadir, defaults_file=m2defaults_file,
-                auto_increment_offset=2, auto_increment_increment=2,
-                replicate_do_db=sync_db)
-        visit_m1 = m1config.setup_new_mysql()
-        visit_m2 = m2config.setup_new_mysql()
-        return visit_m1, visit_m2
+    m1config = MysqlConfig(name=m1name, port=m1port, basedir=basedir,
+            datadir=m1datadir, defaults_file=m1defaults_file,
+            auto_increment_offset=1, auto_increment_increment=2,
+            replicate_do_db=replicate_do_db)
+    m2config = MysqlConfig(name=m2name, port=m2port, basedir=basedir,
+            datadir=m2datadir, defaults_file=m2defaults_file,
+            auto_increment_offset=2, auto_increment_increment=2,
+            replicate_do_db=replicate_do_db)
+    visit_m1 = m1config.setup_new_mysql()
+    visit_m2 = m2config.setup_new_mysql()
 
-    visit_m1, visit_m2 = setup(m1defaults_file, m2defaults_file)
     configure(basedir)
     return '\n'.join([visit_m1, visit_m2])
 
@@ -228,9 +265,9 @@ def _main(argv):
         PLEASE CHECK THE DEFAULT SETTING CAREFULLY""")
     parser.add_argument('-b', '--basedir', help='default basedir: ~/services/mysql', default=os.path.expanduser('~/services/mysql'))
     parser.add_argument('-d', '--datadir', help='default datadir: ~/mysqldata', default=os.path.expanduser('~/mysqldata'))
-    parser.add_argument('-db', '--dbname', help='default db name: sync_db', default='sync_db')
+    parser.add_argument('-db', '--replicate-db', help='default replicate db name: sync_db', default='sync_db')
     parser.add_argument('-n', '--name', help='db name: db1', default='db1')
-    parser.add_argument('-n2', '--name2', help='db name: db1', default='db2')
+    parser.add_argument('-n2', '--name2', help='db name: db2', default='db2')
     parser.add_argument('-p', '--port', help='db port: 3391', type=int, default=3391)
     parser.add_argument('-p2', '--port2', help='db port: 3392', type=int, default=3392)
     different_actions = parser.add_mutually_exclusive_group()
@@ -243,7 +280,7 @@ def _main(argv):
     if args.setup_new_mysql:
         config = MysqlConfig(name=args.name, port=args.port, basedir=args.basedir,
                 datadir=os.path.join(args.datadir, args.name),
-                replicate_do_db=args.dbname)
+                replicate_do_db=args.replicate_db)
         res = config.setup_new_mysql()
         print res
     elif args.create_master_master:
@@ -253,10 +290,17 @@ def _main(argv):
         remove_files_recursively(m2datadir)
         res = create_master_master_replication(m1datadir, m2datadir,
             basedir=args.basedir, m1name=args.name, m2name=args.name2,
-            sync_db=args.dbname, m1port=args.port, m2port=args.port2)
+            replicate_do_db=args.replicate_db, m1port=args.port, m2port=args.port2)
         print res
     elif args.create_master_slave:
-        print "TODO: still in progress"
+        mdatadir = os.path.join(args.datadir, args.name)
+        sdatadir = os.path.join(args.datadir, args.name2)
+        remove_files_recursively(mdatadir)
+        remove_files_recursively(sdatadir)
+        res = create_master_slave_replication(mdatadir, sdatadir,
+            basedir=args.basedir, mname=args.name, sname=args.name2,
+            replicate_do_db=args.replicate_db, mport=args.port, sport=args.port2)
+        print res
     else:
         compile()
 

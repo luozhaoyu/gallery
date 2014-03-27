@@ -114,11 +114,11 @@ def parse_folder(folder, start_time=None):
             first, last = get_first_last_line(each_file)
             last_row = parse_lines([last], start_time)
             if last_row:
-                res.append(parse_single_log(each_file, start_time=start_time))
+                res.extend(parse_single_log(each_file, start_time=start_time))
             else:
                 print 'ignore file:', each_file
         else:
-            res.append(parse_single_log(each_file))
+            res.extend(parse_single_log(each_file))
     return res
 
 
@@ -132,7 +132,6 @@ def _main(argv):
     print args
     res = parse_folder(args.folder, args.time)
     print res
-
 
 
 if __name__ == '__main__':
