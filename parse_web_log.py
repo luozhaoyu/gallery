@@ -16,11 +16,11 @@ def parse_lines(lines, start_time=None, verbose=False):
     """
     Args:
         start_time: parse only log time after the specified time string, such as "1998-08-23 21:12:08"
-    Returns:
-        [{}, {}]
+    Yields:
+        {}
     """
     if not lines:
-        return []
+        yield None
     # LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"" lbcombined
     # 211.140.5.102 - - [19/Mar/2014:00:00:00 +0800] "GET ailbreak=0 HTTP/1.1" 200 8522 "-" "PopStar/1.7.1 CF/72.0.8 Darwin/14.0.0"
     # 211.140.5.102, 1.2.3.4 - - [19/Mar/2014:00:00:00 +0800] "GET ailbreak=0 HTTP/1.1" 200 8522 "-" "PopStar/1.7.1 CF/72.0.8 Darwin/14.0.0"
@@ -36,7 +36,6 @@ def parse_lines(lines, start_time=None, verbose=False):
         r'"(?P<user_agent>.*?)"\s*'
         r"(?P<others>.*?)"
     )
-    res = []
     for line in lines:
         match = log_re.match(line)
         if match:
@@ -44,21 +43,20 @@ def parse_lines(lines, start_time=None, verbose=False):
             if start_time:
                 if time.strptime(d['time'].split(' ')[0], "%d/%b/%Y:%H:%M:%S") >=\
                     time.strptime(start_time, "%Y-%m-%d %H:%M:%S"):
-                    res.append(d)
+                    yield d
                 else:
                     continue
             else:
-                res.append(d)
+                yield d
         else:
             if verbose:
                 print "UNMATCHED LINE:", line
-    return res
 
 
 def parse_single_log(logfile, start_time=None):
     """
     Returns:
-        [{}, {}]
+        res: generator of [{}, {}], it is yielded
     """
     try:
         f = open(logfile, 'r')
@@ -133,6 +131,9 @@ def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_u
     """
     Args:
         grepcmd, tmp_folder, force_update's default value should be the same with parse_single_log_with_pregrep
+
+    Yields:
+        [[yield], []]: nested yields
     """
     def get_first_last_line(filepath):
         f = open(filepath, 'rb')
@@ -156,26 +157,24 @@ def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_u
     # since the other application may find the last row in database to resume its operation
     all_files.sort()
 
-    res = []
     for each_file in all_files:
         if start_time:
             first, last = get_first_last_line(each_file)
             last_row = parse_lines([last], start_time)
             if last_row:
                 if grepcmd:
-                    res.extend(parse_single_log_with_pregrep(each_file,
-                        grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_update=force_update))
+                    yield parse_single_log_with_pregrep(each_file,
+                        grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_update=force_update)
                 else:
-                    res.extend(parse_single_log(each_file, start_time=start_time))
+                    yield parse_single_log(each_file, start_time=start_time)
             else:
                 print 'ignore file:', each_file
         else:
             if grepcmd:
-                res.extend(parse_single_log_with_pregrep(each_file,
-                    grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_update=force_update))
+                yield parse_single_log_with_pregrep(each_file,
+                    grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_update=force_update)
             else:
-                res.extend(parse_single_log(each_file))
-    return res
+                yield parse_single_log(each_file)
 
 
 def _main(argv):
