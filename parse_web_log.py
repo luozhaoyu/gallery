@@ -80,9 +80,7 @@ def execute(cmd):
                 stderr=subprocess.STDOUT,
                 shell=True)
     except subprocess.CalledProcessError as e:
-        print e
-        print e.cmd, e.output
-        print cmd
+        print "%s %s: %s" % (e.returncode, e.cmd, e.output)
         raise e
     return result
 
@@ -104,12 +102,18 @@ def parse_single_log_with_pregrep(logfile, grepcmd, start_time=None, tmp_folder=
     tmp_filepath = os.path.join(tmp_folderpath, log_name + '.pregrep')
     if force_update or not os.path.exists(tmp_filepath):
         cmd = "%s %s > %s" % (grepcmd, logfilepath, tmp_filepath)
-        execute(cmd)
+        try:
+            execute(cmd)
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:  # grepped, but matched nothing
+                return []  # CAREFUL! blank list should be returned since one file return one list
+            else:
+                raise e
 
     res = parse_single_log(tmp_filepath, start_time=start_time)
 
     if not tmp_folder:
-        print 'removing'
+        print 'removing %s' % tmp_filepath
         os.remove(tmp_filepath)
     return res
 
