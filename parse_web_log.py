@@ -6,10 +6,13 @@
     A brief description goes here.
 """
 import os
-import io
 import re
 import time
 import subprocess
+
+
+def output(string):
+    print string
 
 
 def parse_lines(lines, start_time=None, verbose=False):
@@ -50,7 +53,7 @@ def parse_lines(lines, start_time=None, verbose=False):
                 yield d
         else:
             if verbose:
-                print "UNMATCHED LINE:", line
+                output("UNMATCHED LINE: %s" % line)
 
 
 def parse_single_log(logfile, start_time=None):
@@ -68,6 +71,7 @@ def parse_single_log(logfile, start_time=None):
     if filesize == 0:
         return []
 
+    output("Parsing %s from time: %s..." % (logfile, start_time))
     res = parse_lines(lines, start_time=start_time)
     return res
 
@@ -80,27 +84,29 @@ def execute(cmd):
                 stderr=subprocess.STDOUT,
                 shell=True)
     except subprocess.CalledProcessError as e:
-        print "%s %s: %s" % (e.returncode, e.cmd, e.output)
+        output("%s %s: %s" % (e.returncode, e.cmd, e.output))
         raise e
     return result
 
 
-def parse_single_log_with_pregrep(logfile, grepcmd, start_time=None, tmp_folder=None, force_update=False):
+def parse_single_log_with_pregrep(logfile, grepcmd, start_time=None, tmp_folder=None, force_grep=False):
     """grep that file before parsing it
     Program would skip grep if the tmp file exists TODO
 
     Args:
-        tmp_folder, the tmp file would be stored here if it is set
-        force_update, it would grep the logfile no matter whether the tmpfile exists
+        tmp_folder: the tmp file would be stored here if it is set
+        force_grep: it would grep the logfile no matter whether the tmpfile exists
     """
     if not grepcmd:
         return parse_single_log(logfile, start_time=start_time)
+
+    output("Greping %s from time: %s... force_grep: %s" % (logfile, start_time, force_grep))
 
     logfilepath = os.path.abspath(logfile)
     log_name = os.path.basename(logfilepath)
     tmp_folderpath = os.path.abspath(tmp_folder if tmp_folder else '.')
     tmp_filepath = os.path.join(tmp_folderpath, log_name + '.pregrep')
-    if force_update or not os.path.exists(tmp_filepath):
+    if force_grep or not os.path.exists(tmp_filepath):
         cmd = "%s %s > %s" % (grepcmd, logfilepath, tmp_filepath)
         try:
             execute(cmd)
@@ -113,7 +119,7 @@ def parse_single_log_with_pregrep(logfile, grepcmd, start_time=None, tmp_folder=
     res = parse_single_log(tmp_filepath, start_time=start_time)
 
     if not tmp_folder:
-        print 'removing %s' % tmp_filepath
+        output('removing %s' % tmp_filepath)
         os.remove(tmp_filepath)
     return res
 
@@ -131,10 +137,10 @@ def get_recursive_files(folder_path):
     return result
 
 
-def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_update=False):
+def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_grep=False):
     """
     Args:
-        grepcmd, tmp_folder, force_update's default value should be the same with parse_single_log_with_pregrep
+        grepcmd, tmp_folder, force_grep's default value should be the same with parse_single_log_with_pregrep
 
     Yields:
         [[yield], []]: nested yields
@@ -148,7 +154,7 @@ def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_u
         offset = -min(1024, filesize)
         first = next(f)
         while True:
-            f.seek(offset, io.SEEK_END)
+            f.seek(offset, os.SEEK_END)
             lines = f.readlines()
             if len(lines) >= 1:
                 last = lines[-1]
@@ -164,19 +170,19 @@ def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_u
     for each_file in all_files:
         if start_time:
             first, last = get_first_last_line(each_file)
-            last_row = parse_lines([last], start_time)
+            last_row = list(parse_lines([last], start_time))
             if last_row:
                 if grepcmd:
                     yield parse_single_log_with_pregrep(each_file,
-                        grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_update=force_update)
+                        grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_grep=force_grep)
                 else:
                     yield parse_single_log(each_file, start_time=start_time)
             else:
-                print 'ignore file:', each_file
+                output('ignore file: %s' % each_file)
         else:
             if grepcmd:
                 yield parse_single_log_with_pregrep(each_file,
-                    grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_update=force_update)
+                    grepcmd=grepcmd, start_time=start_time, tmp_folder=tmp_folder, force_grep=force_grep)
             else:
                 yield parse_single_log(each_file)
 
