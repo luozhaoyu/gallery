@@ -171,6 +171,9 @@ class MysqldbDao(MysqldbWrapper):
         Args:
             table: table name
             value_dict: {} or [{}], the item(s) to be inserted in dict form
+
+        Returns:
+            identity: the last generated id
         """
         values_clause, args = dict_to_values(value_dict)
         action = 'REPLACE' if replace else 'INSERT'
