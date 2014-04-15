@@ -17,6 +17,7 @@ MYSQL_MASTER_PARAMS = {
     'charset': 'utf8',
     'port': 3391,
     'connect_timeout': 10,
+    'local_infile': 1,
 }
 
 

@@ -71,7 +71,7 @@ def parse_single_log(logfile, start_time=None):
     if filesize == 0:
         return []
 
-    output("Parsing %s from time: %s..." % (logfile, start_time))
+    output("Parsing %s start_time: %s..." % (logfile, start_time))
     res = parse_lines(lines, start_time=start_time)
     return res
 
