@@ -46,10 +46,14 @@ def urlopen_http(host, path, port=80, querys={}, timeout=5, data=None, deseriali
             result = urllib2.urlopen(request_url, data=urllib.urlencode(data), timeout=timeout).read()
         else:
             result = urllib2.urlopen(request_url, timeout=timeout).read()
-        if deserialize_json:
+    except urllib2.URLError as e:
+        raise e
+
+    if deserialize_json:
+        try:
             result = json.loads(result)
-    except Exception:
-        raise Exception("%s: %s" % (request_url, data))
+        except TypeError as e:
+            raise e
     return result
 
 
