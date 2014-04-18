@@ -16,7 +16,7 @@ import json
 
 
 def create_logger(filename, logger_name=None):
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger(logger_name or filename)
     fmt='[%(asctime)s] %(levelname)s [#%(process)d %(funcName)s %(filename)s:%(lineno)d] %(message)s'
     datefmt="%Y-%m-%d %H:%M:%S"
     formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
