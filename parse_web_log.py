@@ -178,7 +178,7 @@ def parse_folder(folder, start_time=None, grepcmd=None, tmp_folder=None, force_g
                 else:
                     yield parse_single_log(each_file, start_time=start_time)
             else:
-                output('ignore file: %s' % each_file)
+                output('ignore file: %s, lastline: %s, start_time: %s' % (each_file, last, start_time))
         else:
             if grepcmd:
                 yield parse_single_log_with_pregrep(each_file,
