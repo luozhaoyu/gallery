@@ -69,7 +69,7 @@ def write_words_info(words_info, outputfile):
 def _main(argv):
     parser = argparse.ArgumentParser(description='hot words with meaning in merriam-webster & sorted by frequency')
     parser.add_argument('-l', '--list', help='word list file need to get checked', default='hotword.txt')
-    parser.add_argument('-o', '--output', help='output file', default='hotword_info')
+    parser.add_argument('-o', '--output', help='output file', default='hotwords.txt')
     parser.add_argument('-d', '--debug', help='not query', default='')
     args = parser.parse_args()
     print args
